@@ -1,6 +1,9 @@
 use std::{
     io,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -8,19 +11,26 @@ use crossterm::{
     event::{Event, KeyCode},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
+use tokio::sync::Mutex;
 use tui::{backend::CrosstermBackend, layout, widgets, Terminal};
 
-struct AppState {}
+struct AppState {
+    input_text: String,
+}
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
-    tokio::task::spawn(ui_events());
-    main_ui().await
+    let state = AppState {
+        input_text: String::new(),
+    };
+    let state = Arc::new(Mutex::new(state));
+    tokio::task::spawn(ui_events(state.clone()));
+    main_ui(state).await
 }
 
-async fn main_ui() -> Result<(), io::Error> {
+async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
     let stdout = io::stdout();
     crossterm::execute!(io::stdout(), EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
@@ -29,6 +39,7 @@ async fn main_ui() -> Result<(), io::Error> {
     terminal.clear()?;
 
     while RUNNING.load(Ordering::Acquire) {
+        let state = state.lock().await;
         terminal.draw(|f| {
             let vertical = layout::Layout::default()
                 .direction(layout::Direction::Vertical)
@@ -43,6 +54,7 @@ async fn main_ui() -> Result<(), io::Error> {
             f.render_widget(messages, vertical[0]);
 
             let input = widgets::Block::default().borders(widgets::Borders::ALL);
+            let input = widgets::Paragraph::new(state.input_text.as_str()).block(input);
             f.render_widget(input, vertical[1]);
 
             let status = widgets::Paragraph::new("uwu");
@@ -60,7 +72,7 @@ async fn main_ui() -> Result<(), io::Error> {
     Ok(())
 }
 
-async fn ui_events() {
+async fn ui_events(state: Arc<Mutex<AppState>>) {
     while let Ok(Ok(event)) = tokio::task::spawn_blocking(crossterm::event::read).await {
         match event {
             Event::FocusGained => (),
@@ -69,7 +81,13 @@ async fn ui_events() {
 
             Event::Key(key) => match key.code {
                 KeyCode::Backspace => (),
-                KeyCode::Enter => (),
+
+                KeyCode::Enter => {
+                    let mut state = state.lock().await;
+                    // TODO: sending messages
+                    state.input_text.clear();
+                }
+
                 KeyCode::Left => (),
                 KeyCode::Right => (),
                 KeyCode::Up => (),
@@ -83,7 +101,11 @@ async fn ui_events() {
                 KeyCode::Delete => (),
                 KeyCode::Insert => (),
                 KeyCode::F(_) => (),
-                KeyCode::Char(_) => (),
+
+                KeyCode::Char(c) => {
+                    state.lock().await.input_text.push(c);
+                }
+
                 KeyCode::Null => (),
 
                 KeyCode::Esc => {
