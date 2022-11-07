@@ -1,0 +1,95 @@
+## TODO
+ - [ ] Basics
+     - [ ] Sending messages
+     - [ ] Receiving messages
+     - [ ] Listing channels
+     - [ ] Changing channels
+ - [ ] Markdown
+     - [ ] **Bold**
+     - [ ] *Italics*
+     - [ ] __Underline__
+     - [ ] `Code`
+     - [ ] Scrollable code blocks
+     - [ ] ~~Strikethrough~~
+     - [ ] ||Spoilers||
+     - [ ] # Headings
+     - [ ] [Links](https://lauwa.xyz)
+     - [ ] Line break thingies
+     - [ ]  - Bullet points
+     - [ ] > Quote blocks
+     - [ ] Arbitrary html
+ - [ ] Messages
+     - [ ] Showing user avatars
+     - [ ] Showing user nicknames
+     - [ ] Receiving images
+     - [ ] Viewing the actual image (ie, not a thumbnail)
+     - [ ] Error message on invalid image
+     - [ ] Viewing animated images
+     - [ ] Sending images
+     - [ ] Editing messages
+     - [ ] Receiving edits
+     - [ ] Viewing edit history
+     - [ ] Redacting messages
+     - [ ] Receiving redactions
+     - [ ] Timestamps
+     - [ ] Previewing text files
+     - [ ] Previewing videos
+     - [ ] Previewing audio files
+     - [ ] Embeds
+         - [ ] Image embeds
+         - [ ] Video embeds
+         - [ ] Audio embeds
+     - [ ] Replies
+     - [ ] Reactions
+     - [ ] Read receipts
+     - [ ] Typing indicators
+     - [ ] Statuses and presence
+     - [ ] Notifications
+ - [ ] Channels
+     - [ ] Creating channels
+     - [ ] Inviting people
+     - [ ] Joining channels
+     - [ ] Leaving channels
+     - [ ] Sorting channels
+     - [ ] Exploring channels in room directory (discovery)
+ - [ ] Spaces
+     - [ ] Joining spaces
+     - [ ] Inviting people
+     - [ ] Leaving spaces
+     - [ ] Creating spaces
+     - [ ] Sorting spaces
+ - [ ] Emojis and stickers
+     - [ ] Inline emojis
+     - [ ] Big emojis
+     - [ ] Sending emojis
+     - [ ] Receiving stickers
+     - [ ] Sending stickers
+ - [ ] Settings
+     - [ ] Logging in and out
+     - [ ] Deactivating account
+     - [ ] Managing notifications
+     - [ ] Changing passwords
+     - [ ] Changing avatar
+         - [ ] Global
+         - [ ] Per room
+     - [ ] Changing nickname
+         - [ ] Global
+         - [ ] Per room
+     - [ ] Managing emojis
+     - [ ] Managing stickers
+     - [ ] Managing channels
+ - [ ] E2EE
+     - [ ] Encrypting
+     - [ ] Decrypting
+     - [ ] Enabling E2EE in a channel
+     - [ ] Verifying devices
+     - [ ] Verifying people
+     - [ ] Seeing other people's devices
+ - [ ] Slash commands
+     - [ ] `/rainbow`
+     - [ ] `/uwu`
+ - [ ] Custom stuff
+     - [ ] Plurality support
+     - [ ] Alt accounts support
+     - [ ] Pronouns
+
