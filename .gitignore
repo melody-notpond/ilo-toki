@@ -1,6 +1,2 @@
-conduit/
-
-
-# Added by cargo
-
 /target
+.credentials

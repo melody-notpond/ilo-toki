@@ -11,6 +11,11 @@ use crossterm::{
     event::{Event, KeyCode},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
+use matrix_sdk::{
+    reqwest::Url,
+    ruma::{DeviceId, OwnedDeviceId, UserId},
+    Client, Session,
+};
 use tokio::sync::Mutex;
 use tui::{backend::CrosstermBackend, layout, widgets, Terminal};
 
@@ -22,6 +27,20 @@ static RUNNING: AtomicBool = AtomicBool::new(true);
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
+    let credentials_file = std::fs::read_to_string(".credentials").unwrap();
+    let credentials = credentials_file.split('\n').collect::<Vec<_>>();
+    let client = Client::new(Url::parse(credentials[0]).unwrap())
+        .await
+        .unwrap();
+    client
+        .restore_login(Session {
+            user_id: UserId::parse(credentials[1]).unwrap(),
+            access_token: credentials[2].to_string(),
+            device_id: credentials[3].into(),
+            refresh_token: None,
+        })
+        .await
+        .unwrap();
     let state = AppState {
         input_text: String::new(),
     };
