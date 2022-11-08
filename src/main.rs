@@ -12,8 +12,9 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
 use matrix_sdk::{
+    config::SyncSettings,
     reqwest::Url,
-    ruma::{DeviceId, OwnedDeviceId, UserId},
+    ruma::{events::room::message::RoomMessageEventContent, UserId},
     Client, Session,
 };
 use tokio::sync::Mutex;
@@ -21,6 +22,7 @@ use tui::{backend::CrosstermBackend, layout, widgets, Terminal};
 
 struct AppState {
     input_text: String,
+    client: Client,
 }
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
@@ -41,8 +43,10 @@ async fn main() -> Result<(), io::Error> {
         })
         .await
         .unwrap();
+    client.sync_once(SyncSettings::default()).await.unwrap();
     let state = AppState {
         input_text: String::new(),
+        client,
     };
     let state = Arc::new(Mutex::new(state));
     tokio::task::spawn(ui_events(state.clone()));
@@ -92,6 +96,8 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
 }
 
 async fn ui_events(state: Arc<Mutex<AppState>>) {
+    let room = state.lock().await.client.joined_rooms().swap_remove(0);
+
     while let Ok(Ok(event)) = tokio::task::spawn_blocking(crossterm::event::read).await {
         match event {
             Event::FocusGained => (),
@@ -103,7 +109,12 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
 
                 KeyCode::Enter => {
                     let mut state = state.lock().await;
-                    // TODO: sending messages
+                    room.send(
+                        RoomMessageEventContent::text_plain(state.input_text.clone()),
+                        None,
+                    )
+                    .await
+                    .unwrap();
                     state.input_text.clear();
                 }
 
