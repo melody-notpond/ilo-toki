@@ -1,7 +1,7 @@
 ## TODO
  - [ ] Basics
-     - [ ] Sending messages
-     - [ ] Receiving messages
+     - [X] Sending messages
+     - [X] Receiving messages
      - [ ] Listing channels
      - [ ] Changing channels
  - [ ] Markdown
