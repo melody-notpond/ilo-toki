@@ -14,15 +14,24 @@ use crossterm::{
 use matrix_sdk::{
     config::SyncSettings,
     reqwest::Url,
-    ruma::{events::room::message::RoomMessageEventContent, UserId},
+    ruma::{
+        events::{room::message::{RoomMessageEventContent, SyncRoomMessageEvent}, SyncMessageLikeEvent},
+        UserId,
+    },
     Client, Session,
 };
 use tokio::sync::Mutex;
-use tui::{backend::CrosstermBackend, layout, widgets, Terminal};
+use tui::{backend::CrosstermBackend, layout, widgets, Terminal, text::{Spans, Span, Text}};
+
+struct Message {
+    user: String,
+    content: String,
+}
 
 struct AppState {
+    messages: Vec<Message>,
     input_text: String,
-    client: Client,
+    client: Arc<Client>,
 }
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
@@ -34,6 +43,7 @@ async fn main() -> Result<(), io::Error> {
     let client = Client::new(Url::parse(credentials[0]).unwrap())
         .await
         .unwrap();
+    let client = Arc::new(client);
     client
         .restore_login(Session {
             user_id: UserId::parse(credentials[1]).unwrap(),
@@ -43,12 +53,39 @@ async fn main() -> Result<(), io::Error> {
         })
         .await
         .unwrap();
-    client.sync_once(SyncSettings::default()).await.unwrap();
     let state = AppState {
+        messages: vec![],
         input_text: String::new(),
-        client,
+        client: client.clone(),
     };
     let state = Arc::new(Mutex::new(state));
+    {
+        let state2 = state.clone();
+        let lock = state.lock().await;
+        lock.client
+            .add_event_handler(move |event: SyncRoomMessageEvent| {
+                let state = state2.clone();
+                async move {
+                    let mut lock = state.lock().await;
+                    match event {
+                        SyncMessageLikeEvent::Original(message) => {
+                            lock.messages.push(Message {
+                                user: message.sender.to_string(),
+                                content: message.content.body().to_string(),
+                            });
+                        }
+
+                        SyncMessageLikeEvent::Redacted(_) => (),
+                    }
+                }
+            });
+
+    }
+
+    client.sync_once(SyncSettings::default()).await.unwrap();
+    tokio::task::spawn(async move {
+        client.sync(SyncSettings::default()).await.unwrap();
+    });
     tokio::task::spawn(ui_events(state.clone()));
     main_ui(state).await
 }
@@ -74,7 +111,14 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
                 .split(f.size());
 
             let messages = widgets::Block::default().borders(widgets::Borders::ALL);
-            f.render_widget(messages, vertical[0]);
+            let messages_list: Vec<_> = state.messages.iter().rev().map(|v| {
+                vec![Spans::from(vec![Span::raw(&v.user)]), Spans::from(vec![Span::raw(&v.content)])]
+            })
+            .map(|v| widgets::ListItem::new(Text::from(v))).collect();
+            let messages = widgets::List::new(messages_list)
+                .block(messages)
+                .start_corner(layout::Corner::BottomLeft);
+            f.render_stateful_widget(messages, vertical[0], &mut widgets::ListState::default());
 
             let input = widgets::Block::default().borders(widgets::Borders::ALL);
             let input = widgets::Paragraph::new(state.input_text.as_str()).block(input);
