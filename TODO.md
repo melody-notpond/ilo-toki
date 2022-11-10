@@ -2,7 +2,7 @@
  - [ ] Basics
      - [X] Sending messages
      - [X] Receiving messages
-     - [ ] Listing channels
+     - [X] Listing channels
      - [ ] Changing channels
  - [ ] Markdown
      - [ ] **Bold**

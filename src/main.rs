@@ -16,12 +16,19 @@ use matrix_sdk::{
     reqwest::Url,
     ruma::{
         events::{room::message::{RoomMessageEventContent, SyncRoomMessageEvent}, SyncMessageLikeEvent},
-        UserId,
+        UserId, OwnedRoomId,
     },
     Client, Session,
 };
 use tokio::sync::Mutex;
 use tui::{backend::CrosstermBackend, layout, widgets, Terminal, text::{Spans, Span, Text}};
+
+// FIXME: temporary
+#[allow(dead_code)]
+struct Channel {
+    name: String,
+    id: OwnedRoomId,
+}
 
 struct Message {
     user: String,
@@ -34,6 +41,8 @@ enum Mode {
 }
 
 struct AppState {
+    channels: Vec<Channel>,
+
     messages: Vec<Message>,
 
     input_text: String,
@@ -64,6 +73,7 @@ async fn main() -> Result<(), io::Error> {
         .await
         .unwrap();
     let state = AppState {
+        channels: vec![],
         messages: vec![],
         input_text: String::new(),
         input_char_pos: 0,
@@ -96,6 +106,17 @@ async fn main() -> Result<(), io::Error> {
     }
 
     client.sync_once(SyncSettings::default()).await.unwrap();
+
+    {
+        let mut lock = state.lock().await;
+        for room in lock.client.joined_rooms() {
+            lock.channels.push(Channel {
+                name: room.display_name().await.map(|v| v.to_string()).unwrap_or_else(|_| String::from("[unknown room]")),
+                id: room.room_id().to_owned(),
+            })
+        }
+    }
+
     tokio::task::spawn(async move {
         client.sync(SyncSettings::default()).await.unwrap();
     });
@@ -115,14 +136,30 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
     while RUNNING.load(Ordering::Acquire) {
         let state = state.lock().await;
         terminal.draw(|f| {
-            let vertical = layout::Layout::default()
+            let horizontal = layout::Layout::default()
+                .direction(layout::Direction::Horizontal)
+                .constraints([
+                    layout::Constraint::Length(20),
+                    layout::Constraint::Min(3),
+                ])
+                .split(f.size());
+            let content = layout::Layout::default()
                 .direction(layout::Direction::Vertical)
                 .constraints([
                     layout::Constraint::Min(3),
                     layout::Constraint::Length(3),
                     layout::Constraint::Length(1),
                 ])
-                .split(f.size());
+                .split(horizontal[1]);
+
+            let channels = widgets::Block::default().borders(widgets::Borders::ALL);
+            let channels_list: Vec<_> = state.channels.iter().rev().map(|v| {
+                vec![Spans::from(vec![Span::raw(&v.name)])]
+            })
+            .map(|v| widgets::ListItem::new(Text::from(v))).collect();
+            let channels = widgets::List::new(channels_list)
+                .block(channels);
+            f.render_stateful_widget(channels, horizontal[0], &mut widgets::ListState::default());
 
             let messages = widgets::Block::default().borders(widgets::Borders::ALL);
             let messages_list: Vec<_> = state.messages.iter().rev().map(|v| {
@@ -132,11 +169,11 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
             let messages = widgets::List::new(messages_list)
                 .block(messages)
                 .start_corner(layout::Corner::BottomLeft);
-            f.render_stateful_widget(messages, vertical[0], &mut widgets::ListState::default());
+            f.render_stateful_widget(messages, content[0], &mut widgets::ListState::default());
 
             let input = widgets::Block::default().borders(widgets::Borders::ALL);
             let input = widgets::Paragraph::new(state.input_text.as_str()).block(input);
-            f.render_widget(input, vertical[1]);
+            f.render_widget(input, content[1]);
 
             let status = {
                 match state.mode {
@@ -145,24 +182,24 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
                 }
             };
             let status = widgets::Paragraph::new(status);
-            f.render_widget(status, vertical[2]);
+            f.render_widget(status, content[2]);
 
             match state.mode {
                 Mode::Insert => {
                     use crossterm::cursor::{CursorShape, SetCursorShape};
                     crossterm::execute!(stdout, SetCursorShape(CursorShape::Line)).unwrap();
-                    let m = state.input_char_pos as u16 % (vertical[1].width - 2);
+                    let m = state.input_char_pos as u16 % (content[1].width - 2);
                     if m == 0 && state.input_char_pos != 0 {
                         f.set_cursor(
-                            vertical[1].x + vertical[1].width - 1,
-                            vertical[1].y
-                                + (state.input_char_pos as u16 - 1) / (vertical[1].width - 2)
+                            content[1].x + content[1].width - 1,
+                            content[1].y
+                                + (state.input_char_pos as u16 - 1) / (content[1].width - 2)
                                 + 1,
                         );
                     } else {
                         f.set_cursor(
-                            vertical[1].x + m + 1,
-                            vertical[1].y + state.input_char_pos as u16 / (vertical[1].width - 2) + 1,
+                            content[1].x + m + 1,
+                            content[1].y + state.input_char_pos as u16 / (content[1].width - 2) + 1,
                         );
                     }
                 }
@@ -170,18 +207,18 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
                 Mode::Normal => {
                     use crossterm::cursor::{CursorShape, SetCursorShape};
                     crossterm::execute!(stdout, SetCursorShape(CursorShape::Block)).unwrap();
-                    let m = state.input_char_pos as u16 % (vertical[1].width - 2);
+                    let m = state.input_char_pos as u16 % (content[1].width - 2);
                     if m == 0 && state.input_char_pos != 0 {
                         f.set_cursor(
-                            vertical[1].x + vertical[1].width - 1,
-                            vertical[1].y
-                                + (state.input_char_pos as u16 - 1) / (vertical[1].width - 2)
+                            content[1].x + content[1].width - 1,
+                            content[1].y
+                                + (state.input_char_pos as u16 - 1) / (content[1].width - 2)
                                 + 1,
                         );
                     } else {
                         f.set_cursor(
-                            vertical[1].x + m + 1,
-                            vertical[1].y + state.input_char_pos as u16 / (vertical[1].width - 2) + 1,
+                            content[1].x + m + 1,
+                            content[1].y + state.input_char_pos as u16 / (content[1].width - 2) + 1,
                         );
                     }
                 }
@@ -200,6 +237,7 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
 }
 
 async fn ui_events(state: Arc<Mutex<AppState>>) {
+    // FIXME: temporary
     let room = state.lock().await.client.joined_rooms().swap_remove(0);
 
     while let Ok(Ok(event)) = tokio::task::spawn_blocking(crossterm::event::read).await {
@@ -255,7 +293,6 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                         KeyCode::Insert => (),
                         KeyCode::F(_) => (),
 
-
                         KeyCode::Left => {
                             if state.input_byte_pos > 0 {
                                 let mut i = 1;
@@ -277,7 +314,6 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                                 state.input_char_pos += 1;
                             }
                         }
-
 
                         KeyCode::Char(c) => {
                             let pos = state.input_byte_pos;
@@ -337,6 +373,7 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                                     state.input_byte_pos = 0;
                                 }
                             }
+
                             KeyCode::Up => (),
                             KeyCode::Down => (),
                             KeyCode::Home => (),
