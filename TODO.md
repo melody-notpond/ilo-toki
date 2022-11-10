@@ -86,10 +86,11 @@
      - [ ] Verifying people
      - [ ] Seeing other people's devices
  - [ ] Slash commands
+     - [ ] Autocomplete
+     - [X] `/quit`
      - [ ] `/rainbow`
      - [ ] `/uwu`
  - [ ] Custom stuff
      - [ ] Plurality support
      - [ ] Alt accounts support
      - [ ] Pronouns
-
