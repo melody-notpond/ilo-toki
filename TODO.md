@@ -1,15 +1,23 @@
-## TODO
+# TODO
 Anything marked with a `*` is not essential (but nice to have and will be implemented eventually).
- - [X] Basics
-     - [X] Sending messages
-     - [X] Receiving messages
-     - [X] Listing channels
-     - [X] Changing channels
+
+## Immediate TODOs for publishing
+ - [X] Scrolling through messages and loading more of them
+ - [ ] Editing messages
+ - [ ] Receiving edits
+ - [ ] Redacting messages
+ - [ ] Receiving redactions
+ - [ ] Creating channels
+ - [ ] Inviting people
+ - [ ] Joining channels
+ - [ ] Leaving channels
+ - [ ] Logging in and out
+
+## All TODOs
  - [ ] Messages
-     - [ ] Scrolling through messages and loading more of them
      - [ ] Editing messages
      - [ ] Receiving edits
-     - [ ] Viewing edit history
+     - [ ] Viewing edit history *
      - [ ] Redacting messages
      - [ ] Receiving redactions
      - [ ] Timestamps
@@ -39,6 +47,13 @@ Anything marked with a `*` is not essential (but nice to have and will be implem
              - [ ] Reading the text
              - [ ] Reading text embeds from allowed websites (this is useful for like pastebin)
      - [ ] Reactions *
+ - [ ] Channels
+     - [ ] Creating channels
+     - [ ] Inviting people
+     - [ ] Joining channels
+     - [ ] Leaving channels
+     - [ ] Sorting channels *
+     - [ ] Exploring channels in room directory (discovery) *
  - [ ] Settings
      - [ ] Logging in and out
      - [ ] Deactivating account
@@ -58,13 +73,6 @@ Anything marked with a `*` is not essential (but nice to have and will be implem
      - [ ] Typing indicators
      - [ ] Statuses and presence
      - [ ] Notifications
- - [ ] Channels
-     - [ ] Creating channels
-     - [ ] Inviting people
-     - [ ] Joining channels
-     - [ ] Leaving channels
-     - [ ] Sorting channels *
-     - [ ] Exploring channels in room directory (discovery) *
  - [ ] Markdown *
      - [ ] **Bold**
      - [ ] *Italics*

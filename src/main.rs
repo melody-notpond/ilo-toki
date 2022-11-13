@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration, collections::HashMap,
+    time::Duration, collections::{HashMap, hash_map::Entry},
 };
 
 use crossterm::{
@@ -15,10 +15,10 @@ use matrix_sdk::{
     config::SyncSettings,
     reqwest::Url,
     ruma::{
-        events::{room::message::{RoomMessageEventContent, SyncRoomMessageEvent}, SyncMessageLikeEvent},
-        UserId, OwnedRoomId,
+        events::{room::message::{RoomMessageEventContent, SyncRoomMessageEvent}, SyncMessageLikeEvent, AnyTimelineEvent, AnyMessageLikeEvent, MessageLikeEvent},
+        UserId, OwnedRoomId, UInt,
     },
-    Client, Session, room::{Room, Joined},
+    Client, Session, room::{Room, Joined, MessagesOptions},
 };
 use tokio::sync::Mutex;
 use tui::{backend::CrosstermBackend, layout, widgets, Terminal, text::{Spans, Span, Text}, style::{Style, Color}};
@@ -27,17 +27,23 @@ struct Channel {
     name: String,
     room: Joined,
     messages: Vec<Message>,
+    // last_update: Option<Instant>,
+    at_top: bool,
+    messages_prev_batch: Option<String>,
+    last_updated_sync: Option<String>,
 }
 
 struct Message {
     user: String,
     content: String,
+    timestamp: UInt,
 }
 
 enum Mode {
     Insert,
     Normal,
     SelectChannel,
+    ScrollMessages,
 }
 
 struct AppState {
@@ -45,6 +51,8 @@ struct AppState {
     channel_ids: Vec<OwnedRoomId>,
     current_channel: Option<OwnedRoomId>,
     channels_state: widgets::ListState,
+
+    messages_state: widgets::ListState,
 
     input_text: String,
     input_char_pos: usize,
@@ -79,6 +87,7 @@ async fn main() -> Result<(), io::Error> {
         channel_ids: vec![],
         current_channel: None,
         channels_state: widgets::ListState::default(),
+        messages_state: widgets::ListState::default(),
         input_text: String::new(),
         input_char_pos: 0,
         input_byte_pos: 0,
@@ -96,13 +105,42 @@ async fn main() -> Result<(), io::Error> {
                 let state = state2.clone();
                 async move {
                     let mut lock = state.lock().await;
+                    let last_updated_sync = lock.client.sync_token().await;
                     match event {
                         SyncMessageLikeEvent::Original(message) => {
-                            if let Some(channel) = lock.channels.get_mut(room.room_id()) {
-                                channel.messages.push(Message {
-                                    user: message.sender.to_string(),
-                                    content: message.content.body().to_string(),
-                                });
+                            let id = room.room_id().to_owned();
+                            if let Entry::Vacant(v) = lock.channels.entry(room.room_id().to_owned()) {
+                                if let Room::Joined(room) = room {
+                                    let channel = Channel {
+                                        name: room.display_name().await.map(|v| v.to_string()).unwrap_or_else(|_| String::from("[unknown room]")),
+                                        room,
+                                        messages: vec![],
+                                        at_top: false,
+                                        messages_prev_batch: None,
+                                        last_updated_sync: None,
+                                    };
+                                    v.insert(channel);
+                                }
+                            }
+
+                            let message = Message {
+                                user: message.sender.to_string(),
+                                content: message.content.body().to_string(),
+                                timestamp: message.origin_server_ts.as_secs(),
+                            };
+                            let channel = lock.channels.get_mut(&id).unwrap();
+                            channel.last_updated_sync = last_updated_sync;
+
+                            for i in (0..=channel.messages.len()).rev() {
+                                if i == 0 {
+                                    channel.messages.insert(0, message);
+                                    break;
+                                }
+
+                                if channel.messages[i - 1].timestamp <= message.timestamp {
+                                    channel.messages.insert(i, message);
+                                    break;
+                                }
                             }
                         }
 
@@ -118,11 +156,16 @@ async fn main() -> Result<(), io::Error> {
         let mut lock = state.lock().await;
         for room in lock.client.joined_rooms() {
             let id = room.room_id().to_owned();
-            lock.channels.insert(id.clone(), Channel {
-                name: room.display_name().await.map(|v| v.to_string()).unwrap_or_else(|_| String::from("[unknown room]")),
-                room,
-                messages: vec![],
-            });
+            if let Entry::Vacant(v) = lock.channels.entry(id.clone()) {
+                v.insert(Channel {
+                    name: room.display_name().await.map(|v| v.to_string()).unwrap_or_else(|_| String::from("[unknown room]")),
+                    room,
+                    messages: vec![],
+                    at_top: false,
+                    messages_prev_batch: None,
+                    last_updated_sync: None,
+                });
+            }
             lock.channel_ids.push(id);
         }
     }
@@ -168,7 +211,7 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
             })
             .map(|v| widgets::ListItem::new(Text::from(v))).collect();
             let channels = widgets::List::new(channels_list)
-                .highlight_style(Style::default().bg(Color::Blue).fg(Color::LightMagenta))
+                .highlight_style(Style::default().bg(Color::Magenta))
                 .block(channels);
             f.render_stateful_widget(channels, horizontal[0], &mut state.channels_state.clone());
 
@@ -180,9 +223,10 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
                     })
                     .map(|v| widgets::ListItem::new(Text::from(v))).collect();
                     let messages = widgets::List::new(messages_list)
+                        .highlight_style(Style::default().bg(Color::Magenta))
                         .block(messages)
                         .start_corner(layout::Corner::BottomLeft);
-                    f.render_stateful_widget(messages, content[0], &mut widgets::ListState::default());
+                    f.render_stateful_widget(messages, content[0], &mut state.messages_state.clone());
                 }
 
                 None => {
@@ -198,7 +242,8 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
                 match state.mode {
                     Mode::Insert => Span::raw("INSERT"),
                     Mode::Normal => Span::raw("NORMAL"),
-                    Mode::SelectChannel => Span::raw("SELECT CHANNEL"),
+                    Mode::SelectChannel => Span::raw("SELECT"),
+                    Mode::ScrollMessages => Span::raw("SCROLL"),
                 }
             };
             let status = widgets::Paragraph::new(status);
@@ -409,6 +454,13 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                                 state.mode = Mode::SelectChannel;
                             }
 
+                            KeyCode::Char('S') => {
+                                if state.current_channel.clone().and_then(|v| state.channels.get_mut(&v)).is_some() {
+                                    state.messages_state.select(Some(0));
+                                    state.mode = Mode::ScrollMessages;
+                                }
+                            }
+
                             KeyCode::Char('i') => {
                                 state.mode = Mode::Insert;
                             }
@@ -526,6 +578,117 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                             KeyCode::F(_) => (),
                             KeyCode::Char(_) => (),
                             KeyCode::Null => (),
+                            KeyCode::CapsLock => (),
+                            KeyCode::ScrollLock => (),
+                            KeyCode::NumLock => (),
+                            KeyCode::PrintScreen => (),
+                            KeyCode::Pause => (),
+                            KeyCode::Menu => (),
+                            KeyCode::KeypadBegin => (),
+                            KeyCode::Media(_) => (),
+                            KeyCode::Modifier(_) => (),
+                        }
+                    }
+
+                    Event::Mouse(_) => (),
+                    Event::Paste(_) => (),
+                    Event::Resize(_, _) => (),
+                }
+            }
+
+            Mode::ScrollMessages => {
+                match event {
+                    Event::FocusGained => (),
+                    Event::FocusLost => (),
+
+                    Event::Key(key) => {
+                        match key.code {
+                            KeyCode::Backspace => (),
+                            KeyCode::Enter => (),
+                            KeyCode::Left => (),
+                            KeyCode::Right => (),
+
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                if let Some(channel) = state.current_channel.as_ref().and_then(|v| state.channels.get(v)) {
+                                    match state.messages_state.selected() {
+                                        Some(current) => {
+                                            if current < channel.messages.len() - 1 {
+                                                state.messages_state.select(Some(current + 1));
+                                            } else if let Some(current) = state.current_channel.clone().and_then(|v| state.channels.get_mut(&v)) {
+                                                if !current.at_top {
+                                                    let mut options = MessagesOptions::backward();
+                                                    options.limit = UInt::from(50u32);
+                                                    options.from = current.messages_prev_batch.as_ref().or_else(|| current.last_updated_sync.as_ref()).map(|v| v.as_str());
+                                                    match current.room.messages(options).await {
+                                                        Ok(v) => {
+                                                            current.at_top = v.end.is_none();
+                                                            current.messages_prev_batch = v.end;
+                                                            for event in v.chunk.into_iter() {
+                                                                if let Ok(v) = event.event.deserialize() {
+                                                                    if let AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(MessageLikeEvent::Original(v))) = v {
+                                                                        let message = Message {
+                                                                            user: v.sender.to_string(),
+                                                                            content: v.content.body().to_string(),
+                                                                            timestamp: v.origin_server_ts.as_secs(),
+                                                                        };
+                                                                        current.messages.insert(0, message);
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+
+                                                        Err(_) => (),
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        None => {
+                                            if !channel.messages.is_empty() {
+                                                state.channels_state.select(Some(0));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                match state.messages_state.selected() {
+                                    Some(current) => {
+                                        if current > 0 {
+                                            state.messages_state.select(Some(current - 1));
+                                        }
+                                    }
+
+                                    None => {
+                                        if let Some(channel) = state.current_channel.as_ref().and_then(|v| state.channels.get(v)) {
+                                            if !channel.messages.is_empty() {
+                                                state.channels_state.select(Some(0));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            KeyCode::Home => (),
+                            KeyCode::End => (),
+                            KeyCode::PageUp => (),
+                            KeyCode::PageDown => (),
+                            KeyCode::Tab => (),
+                            KeyCode::BackTab => (),
+                            KeyCode::Delete => (),
+                            KeyCode::Insert => (),
+                            KeyCode::F(_) => (),
+
+                            KeyCode::Char(_) => (),
+
+                            KeyCode::Null => (),
+
+                            KeyCode::Esc => {
+                                state.messages_state.select(None);
+                                state.mode = Mode::Normal;
+                            }
+
                             KeyCode::CapsLock => (),
                             KeyCode::ScrollLock => (),
                             KeyCode::NumLock => (),
