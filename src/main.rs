@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration,
+    time::Duration, collections::HashMap,
 };
 
 use crossterm::{
@@ -18,16 +18,15 @@ use matrix_sdk::{
         events::{room::message::{RoomMessageEventContent, SyncRoomMessageEvent}, SyncMessageLikeEvent},
         UserId, OwnedRoomId,
     },
-    Client, Session,
+    Client, Session, room::{Room, Joined},
 };
 use tokio::sync::Mutex;
-use tui::{backend::CrosstermBackend, layout, widgets, Terminal, text::{Spans, Span, Text}};
+use tui::{backend::CrosstermBackend, layout, widgets, Terminal, text::{Spans, Span, Text}, style::{Style, Color}};
 
-// FIXME: temporary
-#[allow(dead_code)]
 struct Channel {
     name: String,
-    id: OwnedRoomId,
+    room: Joined,
+    messages: Vec<Message>,
 }
 
 struct Message {
@@ -38,19 +37,21 @@ struct Message {
 enum Mode {
     Insert,
     Normal,
+    SelectChannel,
 }
 
 struct AppState {
-    channels: Vec<Channel>,
-
-    messages: Vec<Message>,
+    channels: HashMap<OwnedRoomId, Channel>,
+    channel_ids: Vec<OwnedRoomId>,
+    current_channel: Option<OwnedRoomId>,
+    channels_state: widgets::ListState,
 
     input_text: String,
     input_char_pos: usize,
     input_byte_pos: usize,
 
-    client: Arc<Client>,
     mode: Mode,
+    client: Arc<Client>,
 }
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
@@ -72,31 +73,37 @@ async fn main() -> Result<(), io::Error> {
         })
         .await
         .unwrap();
+
     let state = AppState {
-        channels: vec![],
-        messages: vec![],
+        channels: HashMap::new(),
+        channel_ids: vec![],
+        current_channel: None,
+        channels_state: widgets::ListState::default(),
         input_text: String::new(),
         input_char_pos: 0,
         input_byte_pos: 0,
+        mode: Mode::Normal,
         client: client.clone(),
-        mode: Mode::Insert,
     };
     let state = Arc::new(Mutex::new(state));
+
     {
         let lock = state.lock().await;
 
         let state2 = state.clone();
         lock.client
-            .add_event_handler(move |event: SyncRoomMessageEvent| {
+            .add_event_handler(move |event: SyncRoomMessageEvent, room: Room| {
                 let state = state2.clone();
                 async move {
                     let mut lock = state.lock().await;
                     match event {
                         SyncMessageLikeEvent::Original(message) => {
-                            lock.messages.push(Message {
-                                user: message.sender.to_string(),
-                                content: message.content.body().to_string(),
-                            });
+                            if let Some(channel) = lock.channels.get_mut(room.room_id()) {
+                                channel.messages.push(Message {
+                                    user: message.sender.to_string(),
+                                    content: message.content.body().to_string(),
+                                });
+                            }
                         }
 
                         SyncMessageLikeEvent::Redacted(_) => (),
@@ -110,10 +117,13 @@ async fn main() -> Result<(), io::Error> {
     {
         let mut lock = state.lock().await;
         for room in lock.client.joined_rooms() {
-            lock.channels.push(Channel {
+            let id = room.room_id().to_owned();
+            lock.channels.insert(id.clone(), Channel {
                 name: room.display_name().await.map(|v| v.to_string()).unwrap_or_else(|_| String::from("[unknown room]")),
-                id: room.room_id().to_owned(),
-            })
+                room,
+                messages: vec![],
+            });
+            lock.channel_ids.push(id);
         }
     }
 
@@ -153,23 +163,32 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
                 .split(horizontal[1]);
 
             let channels = widgets::Block::default().borders(widgets::Borders::ALL);
-            let channels_list: Vec<_> = state.channels.iter().rev().map(|v| {
-                vec![Spans::from(vec![Span::raw(&v.name)])]
+            let channels_list: Vec<_> = state.channel_ids.iter().filter_map(|id| {
+                state.channels.get(id).map(|v| vec![Spans::from(vec![Span::raw(&v.name)])])
             })
             .map(|v| widgets::ListItem::new(Text::from(v))).collect();
             let channels = widgets::List::new(channels_list)
+                .highlight_style(Style::default().bg(Color::Blue).fg(Color::LightMagenta))
                 .block(channels);
-            f.render_stateful_widget(channels, horizontal[0], &mut widgets::ListState::default());
+            f.render_stateful_widget(channels, horizontal[0], &mut state.channels_state.clone());
 
             let messages = widgets::Block::default().borders(widgets::Borders::ALL);
-            let messages_list: Vec<_> = state.messages.iter().rev().map(|v| {
-                vec![Spans::from(vec![Span::raw(&v.user)]), Spans::from(vec![Span::raw(&v.content)])]
-            })
-            .map(|v| widgets::ListItem::new(Text::from(v))).collect();
-            let messages = widgets::List::new(messages_list)
-                .block(messages)
-                .start_corner(layout::Corner::BottomLeft);
-            f.render_stateful_widget(messages, content[0], &mut widgets::ListState::default());
+            match state.current_channel.as_ref().and_then(|v| state.channels.get(v)).map(|v| &v.messages) {
+                Some(current) => {
+                    let messages_list: Vec<_> = current.iter().rev().map(|v| {
+                        vec![Spans::from(vec![Span::raw(&v.user)]), Spans::from(vec![Span::raw(&v.content)])]
+                    })
+                    .map(|v| widgets::ListItem::new(Text::from(v))).collect();
+                    let messages = widgets::List::new(messages_list)
+                        .block(messages)
+                        .start_corner(layout::Corner::BottomLeft);
+                    f.render_stateful_widget(messages, content[0], &mut widgets::ListState::default());
+                }
+
+                None => {
+                    f.render_widget(messages, content[0]);
+                }
+            }
 
             let input = widgets::Block::default().borders(widgets::Borders::ALL);
             let input = widgets::Paragraph::new(state.input_text.as_str()).block(input);
@@ -179,6 +198,7 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
                 match state.mode {
                     Mode::Insert => Span::raw("INSERT"),
                     Mode::Normal => Span::raw("NORMAL"),
+                    Mode::SelectChannel => Span::raw("SELECT CHANNEL"),
                 }
             };
             let status = widgets::Paragraph::new(status);
@@ -222,6 +242,8 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
                         );
                     }
                 }
+
+                _ => (),
             }
         })?;
 
@@ -237,9 +259,6 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
 }
 
 async fn ui_events(state: Arc<Mutex<AppState>>) {
-    // FIXME: temporary
-    let room = state.lock().await.client.joined_rooms().swap_remove(0);
-
     while let Ok(Ok(event)) = tokio::task::spawn_blocking(crossterm::event::read).await {
         let mut state = state.lock().await;
         match state.mode {
@@ -269,12 +288,14 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                                 break;
                             }
                             if !state.input_text.is_empty() {
-                                room.send(
-                                    RoomMessageEventContent::text_plain(state.input_text.clone()),
-                                    None,
-                                )
-                                .await
-                                .unwrap();
+                                if let Some(room) = state.current_channel.as_ref().and_then(|v| state.channels.get(v)).map(|v| &v.room) {
+                                    room.send(
+                                        RoomMessageEventContent::text_plain(state.input_text.clone()),
+                                        None,
+                                    )
+                                    .await
+                                    .unwrap();
+                                }
                                 state.input_text.clear();
                                 state.input_char_pos = 0;
                                 state.input_byte_pos = 0;
@@ -358,16 +379,14 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                                     break;
                                 }
                                 if !state.input_text.is_empty() {
-                                    if state.input_text == "/quit" {
-                                        RUNNING.store(false, Ordering::Release);
-                                        break;
+                                    if let Some(room) = state.current_channel.as_ref().and_then(|v| state.channels.get(v)).map(|v| &v.room) {
+                                        room.send(
+                                            RoomMessageEventContent::text_plain(state.input_text.clone()),
+                                            None,
+                                        )
+                                        .await
+                                        .unwrap();
                                     }
-                                    room.send(
-                                        RoomMessageEventContent::text_plain(state.input_text.clone()),
-                                        None,
-                                    )
-                                    .await
-                                    .unwrap();
                                     state.input_text.clear();
                                     state.input_char_pos = 0;
                                     state.input_byte_pos = 0;
@@ -385,6 +404,10 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                             KeyCode::Delete => (),
                             KeyCode::Insert => (),
                             KeyCode::F(_) => (),
+
+                            KeyCode::Char('C') => {
+                                state.mode = Mode::SelectChannel;
+                            }
 
                             KeyCode::Char('i') => {
                                 state.mode = Mode::Insert;
@@ -433,7 +456,93 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                     Event::Resize(_, _) => (),
                 }
             }
-        }
 
+            Mode::SelectChannel => {
+                match event {
+                    Event::FocusGained => (),
+                    Event::FocusLost => (),
+
+                    Event::Key(key) => {
+                        match key.code {
+                            KeyCode::Backspace => (),
+
+                            KeyCode::Enter => {
+                                state.current_channel = state.channels_state.selected().and_then(|v| state.channel_ids.get(v)).cloned();
+                                state.mode = Mode::Normal;
+                            }
+
+                            KeyCode::Left => (),
+                            KeyCode::Right => (),
+
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                match state.channels_state.selected() {
+                                    Some(current) => {
+                                        if current > 0 {
+                                            state.channels_state.select(Some(current - 1));
+                                        } else {
+                                            let select = state.channel_ids.len() - 1;
+                                            state.channels_state.select(Some(select));
+                                        }
+                                    }
+
+                                    None => {
+                                        let select = state.channel_ids.len() - 1;
+                                        state.channels_state.select(Some(select));
+                                    }
+                                }
+                            }
+
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                match state.channels_state.selected() {
+                                    Some(current) => {
+                                        if current < state.channel_ids.len() - 1 {
+                                            state.channels_state.select(Some(current + 1));
+                                        } else {
+                                            state.channels_state.select(Some(0));
+                                        }
+                                    }
+
+                                    None => {
+                                        let select = state.channel_ids.len() - 1;
+                                        state.channels_state.select(Some(select));
+                                    }
+                                }
+                            }
+
+                            KeyCode::Esc => {
+                                state.channels_state.select(None);
+                                state.current_channel = None;
+                                state.mode = Mode::Normal;
+                            }
+
+                            KeyCode::Home => (),
+                            KeyCode::End => (),
+                            KeyCode::PageUp => (),
+                            KeyCode::PageDown => (),
+                            KeyCode::Tab => (),
+                            KeyCode::BackTab => (),
+                            KeyCode::Delete => (),
+                            KeyCode::Insert => (),
+                            KeyCode::F(_) => (),
+                            KeyCode::Char(_) => (),
+                            KeyCode::Null => (),
+                            KeyCode::CapsLock => (),
+                            KeyCode::ScrollLock => (),
+                            KeyCode::NumLock => (),
+                            KeyCode::PrintScreen => (),
+                            KeyCode::Pause => (),
+                            KeyCode::Menu => (),
+                            KeyCode::KeypadBegin => (),
+                            KeyCode::Media(_) => (),
+                            KeyCode::Modifier(_) => (),
+                        }
+                    }
+
+                    Event::Mouse(_) => (),
+                    Event::Paste(_) => (),
+                    Event::Resize(_, _) => (),
+                }
+            }
+        }
     }
 }
