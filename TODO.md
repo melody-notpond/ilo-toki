@@ -1,10 +1,71 @@
 ## TODO
+Anything marked with a `*` is not essential (but nice to have and will be implemented eventually).
  - [X] Basics
      - [X] Sending messages
      - [X] Receiving messages
      - [X] Listing channels
      - [X] Changing channels
- - [ ] Markdown
+ - [ ] Messages
+     - [ ] Scrolling through messages and loading more of them
+     - [ ] Editing messages
+     - [ ] Receiving edits
+     - [ ] Viewing edit history
+     - [ ] Redacting messages
+     - [ ] Receiving redactions
+     - [ ] Timestamps
+     - [ ] Showing user nicknames
+     - [ ] Showing user avatars *
+     - [ ] Replies
+     - [ ] Embeds
+         - [ ] Sending files
+         - [ ] Image embeds - ueberzug is your friend :D
+             - [ ] Receiving images
+             - [ ] Viewing the image *
+             - [ ] Error message on invalid image *
+             - [ ] Viewing animated images *
+             - [ ] Viewing image embeds from allowed websites *
+         - [ ] Video embeds
+             - [ ] Receiving videos
+             - [ ] Viewing the video *
+             - [ ] Error message on invalid video *
+             - [ ] Viewing video embeds from allowed websites *
+         - [ ] Audio embeds
+             - [ ] Receiving audio
+             - [ ] Listening the audio *
+             - [ ] Error message on invalid audio *
+             - [ ] Listening audio embeds from allowed websites *
+         - [ ] Text files
+             - [ ] Receiving text files
+             - [ ] Reading the text
+             - [ ] Reading text embeds from allowed websites (this is useful for like pastebin)
+     - [ ] Reactions *
+ - [ ] Settings
+     - [ ] Logging in and out
+     - [ ] Deactivating account
+     - [ ] Managing notifications *
+     - [ ] Changing passwords
+     - [ ] Changing avatar *
+         - [ ] Global
+         - [ ] Per room
+     - [ ] Changing nickname
+         - [ ] Global
+         - [ ] Per room
+     - [ ] Managing emojis *
+     - [ ] Managing stickers *
+     - [ ] Managing channels *
+ - [ ] Miscellaneous functionality *
+     - [ ] Read receipts
+     - [ ] Typing indicators
+     - [ ] Statuses and presence
+     - [ ] Notifications
+ - [ ] Channels
+     - [ ] Creating channels
+     - [ ] Inviting people
+     - [ ] Joining channels
+     - [ ] Leaving channels
+     - [ ] Sorting channels *
+     - [ ] Exploring channels in room directory (discovery) *
+ - [ ] Markdown *
      - [ ] **Bold**
      - [ ] *Italics*
      - [ ] __Underline__
@@ -18,66 +79,6 @@
      - [ ]  - Bullet points
      - [ ] > Quote blocks
      - [ ] Arbitrary html
- - [ ] Messages
-     - [ ] Showing user avatars
-     - [ ] Showing user nicknames
-     - [ ] Receiving images
-     - [ ] Viewing the actual image (ie, not a thumbnail)
-     - [ ] Error message on invalid image
-     - [ ] Viewing animated images
-     - [ ] Sending images
-     - [ ] Editing messages
-     - [ ] Receiving edits
-     - [ ] Viewing edit history
-     - [ ] Redacting messages
-     - [ ] Receiving redactions
-     - [ ] Timestamps
-     - [ ] Previewing text files
-     - [ ] Previewing videos
-     - [ ] Previewing audio files
-     - [ ] Embeds
-         - [ ] Image embeds
-         - [ ] Video embeds
-         - [ ] Audio embeds
-     - [ ] Replies
-     - [ ] Reactions
-     - [ ] Read receipts
-     - [ ] Typing indicators
-     - [ ] Statuses and presence
-     - [ ] Notifications
- - [ ] Channels
-     - [ ] Creating channels
-     - [ ] Inviting people
-     - [ ] Joining channels
-     - [ ] Leaving channels
-     - [ ] Sorting channels
-     - [ ] Exploring channels in room directory (discovery)
- - [ ] Spaces
-     - [ ] Joining spaces
-     - [ ] Inviting people
-     - [ ] Leaving spaces
-     - [ ] Creating spaces
-     - [ ] Sorting spaces
- - [ ] Emojis and stickers
-     - [ ] Inline emojis
-     - [ ] Big emojis
-     - [ ] Sending emojis
-     - [ ] Receiving stickers
-     - [ ] Sending stickers
- - [ ] Settings
-     - [ ] Logging in and out
-     - [ ] Deactivating account
-     - [ ] Managing notifications
-     - [ ] Changing passwords
-     - [ ] Changing avatar
-         - [ ] Global
-         - [ ] Per room
-     - [ ] Changing nickname
-         - [ ] Global
-         - [ ] Per room
-     - [ ] Managing emojis
-     - [ ] Managing stickers
-     - [ ] Managing channels
  - [ ] E2EE
      - [ ] Encrypting
      - [ ] Decrypting
@@ -85,12 +86,23 @@
      - [ ] Verifying devices
      - [ ] Verifying people
      - [ ] Seeing other people's devices
- - [ ] Slash commands
-     - [ ] Autocomplete
-     - [X] `/quit`
+ - [ ] Spaces *
+     - [ ] Joining spaces
+     - [ ] Inviting people
+     - [ ] Leaving spaces
+     - [ ] Creating spaces
+     - [ ] Sorting spaces
+ - [ ] Emojis and stickers *
+     - [ ] Inline emojis
+     - [ ] Big emojis
+     - [ ] Sending emojis
+     - [ ] Receiving stickers
+     - [ ] Sending stickers
+ - [ ] Funny nonessential slash commands *
+     - [ ] Autocomplete *
      - [ ] `/rainbow`
      - [ ] `/uwu`
- - [ ] Custom stuff
+ - [ ] Custom stuff *
      - [ ] Plurality support
      - [ ] Alt accounts support
      - [ ] Pronouns
