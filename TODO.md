@@ -1,9 +1,9 @@
 ## TODO
- - [ ] Basics
+ - [X] Basics
      - [X] Sending messages
      - [X] Receiving messages
      - [X] Listing channels
-     - [ ] Changing channels
+     - [X] Changing channels
  - [ ] Markdown
      - [ ] **Bold**
      - [ ] *Italics*
