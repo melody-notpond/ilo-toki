@@ -16,7 +16,7 @@ use matrix_sdk::{
     reqwest::Url,
     ruma::{
         events::{room::message::{RoomMessageEventContent, SyncRoomMessageEvent}, SyncMessageLikeEvent, AnyTimelineEvent, AnyMessageLikeEvent, MessageLikeEvent},
-        UserId, OwnedRoomId, UInt,
+        UserId, OwnedRoomId, UInt, OwnedEventId,
     },
     Client, Session, room::{Room, Joined, MessagesOptions},
 };
@@ -26,14 +26,15 @@ use tui::{backend::CrosstermBackend, layout, widgets, Terminal, text::{Spans, Sp
 struct Channel {
     name: String,
     room: Joined,
-    messages: Vec<Message>,
+    message_ids: Vec<OwnedEventId>,
+    messages: HashMap<OwnedEventId, Message>,
     // last_update: Option<Instant>,
     at_top: bool,
     messages_prev_batch: Option<String>,
-    last_updated_sync: Option<String>,
 }
 
 struct Message {
+    id: OwnedEventId,
     user: String,
     content: String,
     timestamp: UInt,
@@ -105,7 +106,6 @@ async fn main() -> Result<(), io::Error> {
                 let state = state2.clone();
                 async move {
                     let mut lock = state.lock().await;
-                    let last_updated_sync = lock.client.sync_token().await;
                     match event {
                         SyncMessageLikeEvent::Original(message) => {
                             let id = room.room_id().to_owned();
@@ -114,34 +114,40 @@ async fn main() -> Result<(), io::Error> {
                                     let channel = Channel {
                                         name: room.display_name().await.map(|v| v.to_string()).unwrap_or_else(|_| String::from("[unknown room]")),
                                         room,
-                                        messages: vec![],
+                                        message_ids: vec![],
+                                        messages: HashMap::new(),
                                         at_top: false,
                                         messages_prev_batch: None,
-                                        last_updated_sync: None,
                                     };
                                     v.insert(channel);
                                 }
                             }
 
+                            let channel = lock.channels.get_mut(&id).unwrap();
+                            if channel.messages.contains_key(&message.event_id) {
+                                return;
+                            }
+
                             let message = Message {
+                                id: message.event_id.clone(),
                                 user: message.sender.to_string(),
                                 content: message.content.body().to_string(),
                                 timestamp: message.origin_server_ts.as_secs(),
                             };
-                            let channel = lock.channels.get_mut(&id).unwrap();
-                            channel.last_updated_sync = last_updated_sync;
 
-                            for i in (0..=channel.messages.len()).rev() {
+                            for i in (0..=channel.message_ids.len()).rev() {
                                 if i == 0 {
-                                    channel.messages.insert(0, message);
+                                    channel.message_ids.insert(0, message.id.clone());
                                     break;
                                 }
 
-                                if channel.messages[i - 1].timestamp <= message.timestamp {
-                                    channel.messages.insert(i, message);
+                                if channel.messages.get(&channel.message_ids[i - 1]).map(|v| v.timestamp <= message.timestamp).unwrap_or(false) {
+                                    channel.message_ids.insert(i, message.id.clone());
                                     break;
                                 }
                             }
+
+                            channel.messages.insert(message.id.clone(), message);
                         }
 
                         SyncMessageLikeEvent::Redacted(_) => (),
@@ -160,10 +166,10 @@ async fn main() -> Result<(), io::Error> {
                 v.insert(Channel {
                     name: room.display_name().await.map(|v| v.to_string()).unwrap_or_else(|_| String::from("[unknown room]")),
                     room,
-                    messages: vec![],
+                    messages: HashMap::new(),
+                    message_ids: vec![],
                     at_top: false,
                     messages_prev_batch: None,
-                    last_updated_sync: None,
                 });
             }
             lock.channel_ids.push(id);
@@ -216,9 +222,9 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
             f.render_stateful_widget(channels, horizontal[0], &mut state.channels_state.clone());
 
             let messages = widgets::Block::default().borders(widgets::Borders::ALL);
-            match state.current_channel.as_ref().and_then(|v| state.channels.get(v)).map(|v| &v.messages) {
+            match state.current_channel.as_ref().and_then(|v| state.channels.get(v)) {
                 Some(current) => {
-                    let messages_list: Vec<_> = current.iter().rev().map(|v| {
+                    let messages_list: Vec<_> = current.message_ids.iter().rev().filter_map(|v| current.messages.get(v)).map(|v| {
                         vec![Spans::from(vec![Span::raw(&v.user)]), Spans::from(vec![Span::raw(&v.content)])]
                     })
                     .map(|v| widgets::ListItem::new(Text::from(v))).collect();
@@ -609,6 +615,7 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                             KeyCode::Right => (),
 
                             KeyCode::Up | KeyCode::Char('k') => {
+                                let sync_token = state.client.sync_token().await;
                                 if let Some(channel) = state.current_channel.as_ref().and_then(|v| state.channels.get(v)) {
                                     match state.messages_state.selected() {
                                         Some(current) => {
@@ -618,26 +625,24 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                                                 if !current.at_top {
                                                     let mut options = MessagesOptions::backward();
                                                     options.limit = UInt::from(50u32);
-                                                    options.from = current.messages_prev_batch.as_ref().or_else(|| current.last_updated_sync.as_ref()).map(|v| v.as_str());
-                                                    match current.room.messages(options).await {
-                                                        Ok(v) => {
-                                                            current.at_top = v.end.is_none();
-                                                            current.messages_prev_batch = v.end;
-                                                            for event in v.chunk.into_iter() {
-                                                                if let Ok(v) = event.event.deserialize() {
-                                                                    if let AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(MessageLikeEvent::Original(v))) = v {
-                                                                        let message = Message {
-                                                                            user: v.sender.to_string(),
-                                                                            content: v.content.body().to_string(),
-                                                                            timestamp: v.origin_server_ts.as_secs(),
-                                                                        };
-                                                                        current.messages.insert(0, message);
-                                                                    }
+                                                    options.from = current.messages_prev_batch.as_ref().or(sync_token.as_ref()).map(|v| v.as_str());
+                                                    if let Ok(v) = current.room.messages(options).await {
+                                                        current.at_top = v.end.is_none();
+                                                        current.messages_prev_batch = v.end;
+                                                        for event in v.chunk.into_iter() {
+                                                            if let Ok(AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(MessageLikeEvent::Original(v)))) = event.event.deserialize() {
+                                                                let message = Message {
+                                                                    id: v.event_id.clone(),
+                                                                    user: v.sender.to_string(),
+                                                                    content: v.content.body().to_string(),
+                                                                    timestamp: v.origin_server_ts.as_secs(),
+                                                                };
+                                                                if !current.messages.contains_key(&message.id) {
+                                                                    current.message_ids.insert(0, message.id.clone());
+                                                                    current.messages.insert(message.id.clone(), message);
                                                                 }
                                                             }
                                                         }
-
-                                                        Err(_) => (),
                                                     }
                                                 }
                                             }

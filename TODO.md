@@ -110,7 +110,9 @@ Anything marked with a `*` is not essential (but nice to have and will be implem
      - [ ] Autocomplete *
      - [ ] `/rainbow`
      - [ ] `/uwu`
+     - [ ] `/tutorial`
  - [ ] Custom stuff *
-     - [ ] Plurality support
+     - [ ] Theming
      - [ ] Alt accounts support
+     - [ ] Plurality support
      - [ ] Pronouns
