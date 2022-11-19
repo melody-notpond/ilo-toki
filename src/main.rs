@@ -15,22 +15,13 @@ use matrix_sdk::{
     config::SyncSettings,
     reqwest::Url,
     ruma::{
-        events::{room::message::{RoomMessageEventContent, SyncRoomMessageEvent, Relation}, SyncMessageLikeEvent, AnyTimelineEvent, AnyMessageLikeEvent, MessageLikeEvent},
+        events::{room::message::{RoomMessageEventContent, SyncRoomMessageEvent, Relation}, SyncMessageLikeEvent, AnyTimelineEvent, AnyMessageLikeEvent, MessageLikeEvent, OriginalSyncMessageLikeEvent},
         UserId, OwnedRoomId, UInt, OwnedEventId,
     },
     Client, Session, room::{Room, Joined, MessagesOptions},
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 use tui::{backend::CrosstermBackend, layout, widgets, Terminal, text::{Spans, Span, Text}, style::{Style, Color}};
-
-struct Channel {
-    name: String,
-    room: Joined,
-    message_ids: Vec<OwnedEventId>,
-    messages: HashMap<OwnedEventId, Message>,
-    at_top: bool,
-    messages_prev_batch: Option<String>,
-}
 
 struct Message {
     id: OwnedEventId,
@@ -38,6 +29,21 @@ struct Message {
     edited: bool,
     content: String,
     timestamp: UInt,
+}
+
+struct Edit {
+    content: String,
+    timestamp: UInt,
+}
+
+struct Channel {
+    name: String,
+    room: Joined,
+    message_ids: Vec<OwnedEventId>,
+    messages: HashMap<OwnedEventId, Message>,
+    message_edits: HashMap<OwnedEventId, Edit>,
+    at_top: bool,
+    messages_prev_batch: Option<String>,
 }
 
 enum Mode {
@@ -116,6 +122,7 @@ async fn main() -> Result<(), io::Error> {
                                         room,
                                         message_ids: vec![],
                                         messages: HashMap::new(),
+                                        message_edits: HashMap::new(),
                                         at_top: false,
                                         messages_prev_batch: None,
                                     };
@@ -123,53 +130,7 @@ async fn main() -> Result<(), io::Error> {
                                 }
                             }
 
-                            let channel = lock.channels.get_mut(&id).unwrap();
-                            if channel.messages.contains_key(&message.event_id) {
-                                return;
-                            }
-
-                            match message.content.relates_to {
-                                Some(Relation::Replacement(edit)) => {
-                                    if let Some(message) = channel.messages.get_mut(&edit.event_id) {
-                                        message.edited = true;
-                                        message.content = edit.new_content.body().to_string();
-                                    }
-                                }
-
-                                // TODO: replies
-                                _ => {
-                                    let message = Message {
-                                        id: message.event_id.clone(),
-                                        user: message.sender.to_string(),
-                                        edited: false,
-                                        content: message.content.body().to_string(),
-                                        timestamp: message.origin_server_ts.as_secs(),
-                                    };
-
-                                    for i in (0..=channel.message_ids.len()).rev() {
-                                        if i == 0 {
-                                            channel.message_ids.insert(0, message.id.clone());
-                                            channel.messages.insert(message.id.clone(), message);
-                                            break;
-                                        }
-
-                                        if channel.messages.get(&channel.message_ids[i - 1]).map(|v| v.timestamp <= message.timestamp).unwrap_or(false) {
-                                            channel.message_ids.insert(i, message.id.clone());
-                                            channel.messages.insert(message.id.clone(), message);
-
-                                            match lock.messages_state.selected() {
-                                                Some(sel) if sel == i => {
-                                                    lock.messages_state.select(Some(sel - 1));
-                                                }
-
-                                                _ => (),
-                                            }
-
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
+                            handle_new_message(&id, message, &mut lock);
                         }
 
                         SyncMessageLikeEvent::Redacted(_) => (),
@@ -188,8 +149,9 @@ async fn main() -> Result<(), io::Error> {
                 v.insert(Channel {
                     name: room.display_name().await.map(|v| v.to_string()).unwrap_or_else(|_| String::from("[unknown room]")),
                     room,
-                    messages: HashMap::new(),
                     message_ids: vec![],
+                    messages: HashMap::new(),
+                    message_edits: HashMap::new(),
                     at_top: false,
                     messages_prev_batch: None,
                 });
@@ -203,6 +165,83 @@ async fn main() -> Result<(), io::Error> {
     });
     tokio::task::spawn(ui_events(state.clone()));
     main_ui(state).await
+}
+
+fn handle_new_message(id: &OwnedRoomId, message: OriginalSyncMessageLikeEvent<RoomMessageEventContent>, lock: &mut MutexGuard<AppState>) {
+    let channel = lock.channels.get_mut(id).unwrap();
+    if channel.messages.contains_key(&message.event_id) {
+        return;
+    }
+
+    match message.content.relates_to {
+        Some(Relation::Replacement(edit)) => {
+            match channel.messages.get_mut(&edit.event_id) {
+                Some(message) => {
+                    message.edited = true;
+                    message.content = edit.new_content.body().to_string();
+                }
+
+                None => {
+                    match channel.message_edits.entry(edit.event_id) {
+                        Entry::Occupied(mut v) => {
+                            if v.get().timestamp < message.origin_server_ts.0 {
+                                v.insert(Edit {
+                                    content: edit.new_content.body().to_string(),
+                                    timestamp: message.origin_server_ts.0,
+                                });
+                            }
+                        }
+
+                        Entry::Vacant(v) => {
+                            v.insert(Edit {
+                                content: edit.new_content.body().to_string(),
+                                timestamp: message.origin_server_ts.0,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // TODO: replies
+        _ => {
+            let mut message = Message {
+                id: message.event_id.clone(),
+                user: message.sender.to_string(),
+                edited: false,
+                content: message.content.body().to_string(),
+                timestamp: message.origin_server_ts.as_secs(),
+            };
+
+            if let Some(edit) = channel.message_edits.remove(&message.id) {
+                message.edited = true;
+                message.content = edit.content;
+            }
+
+            for i in (0..=channel.message_ids.len()).rev() {
+                if i == 0 {
+                    channel.message_ids.insert(0, message.id.clone());
+                    channel.messages.insert(message.id.clone(), message);
+                    break;
+                }
+
+                if channel.messages.get(&channel.message_ids[i - 1]).map(|v| v.timestamp <= message.timestamp).unwrap_or(false) {
+                    channel.message_ids.insert(i, message.id.clone());
+                    channel.messages.insert(message.id.clone(), message);
+
+                    match lock.messages_state.selected() {
+                        Some(sel) if sel == i => {
+                            lock.messages_state.select(Some(sel - 1));
+                        }
+
+                        _ => (),
+                    }
+
+                    break;
+                }
+            }
+        }
+    }
 }
 
 async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
@@ -651,19 +690,10 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                                                     if let Ok(v) = current.room.messages(options).await {
                                                         current.at_top = v.end.is_none();
                                                         current.messages_prev_batch = v.end;
+                                                        let id = state.current_channel.as_ref().cloned().unwrap();
                                                         for event in v.chunk.into_iter() {
                                                             if let Ok(AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(MessageLikeEvent::Original(v)))) = event.event.deserialize() {
-                                                                let message = Message {
-                                                                    id: v.event_id.clone(),
-                                                                    user: v.sender.to_string(),
-                                                                    edited: false,
-                                                                    content: v.content.body().to_string(),
-                                                                    timestamp: v.origin_server_ts.as_secs(),
-                                                                };
-                                                                if !current.messages.contains_key(&message.id) {
-                                                                    current.message_ids.insert(0, message.id.clone());
-                                                                    current.messages.insert(message.id.clone(), message);
-                                                                }
+                                                                handle_new_message(&id, v.into(), &mut state);
                                                             }
                                                         }
                                                     }
