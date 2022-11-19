@@ -15,7 +15,7 @@ use matrix_sdk::{
     config::SyncSettings,
     reqwest::Url,
     ruma::{
-        events::{room::message::{RoomMessageEventContent, SyncRoomMessageEvent}, SyncMessageLikeEvent, AnyTimelineEvent, AnyMessageLikeEvent, MessageLikeEvent},
+        events::{room::message::{RoomMessageEventContent, SyncRoomMessageEvent, Relation}, SyncMessageLikeEvent, AnyTimelineEvent, AnyMessageLikeEvent, MessageLikeEvent},
         UserId, OwnedRoomId, UInt, OwnedEventId,
     },
     Client, Session, room::{Room, Joined, MessagesOptions},
@@ -28,7 +28,6 @@ struct Channel {
     room: Joined,
     message_ids: Vec<OwnedEventId>,
     messages: HashMap<OwnedEventId, Message>,
-    // last_update: Option<Instant>,
     at_top: bool,
     messages_prev_batch: Option<String>,
 }
@@ -36,6 +35,7 @@ struct Channel {
 struct Message {
     id: OwnedEventId,
     user: String,
+    edited: bool,
     content: String,
     timestamp: UInt,
 }
@@ -128,26 +128,48 @@ async fn main() -> Result<(), io::Error> {
                                 return;
                             }
 
-                            let message = Message {
-                                id: message.event_id.clone(),
-                                user: message.sender.to_string(),
-                                content: message.content.body().to_string(),
-                                timestamp: message.origin_server_ts.as_secs(),
-                            };
-
-                            for i in (0..=channel.message_ids.len()).rev() {
-                                if i == 0 {
-                                    channel.message_ids.insert(0, message.id.clone());
-                                    break;
+                            match message.content.relates_to {
+                                Some(Relation::Replacement(edit)) => {
+                                    if let Some(message) = channel.messages.get_mut(&edit.event_id) {
+                                        message.edited = true;
+                                        message.content = edit.new_content.body().to_string();
+                                    }
                                 }
 
-                                if channel.messages.get(&channel.message_ids[i - 1]).map(|v| v.timestamp <= message.timestamp).unwrap_or(false) {
-                                    channel.message_ids.insert(i, message.id.clone());
-                                    break;
+                                // TODO: replies
+                                _ => {
+                                    let message = Message {
+                                        id: message.event_id.clone(),
+                                        user: message.sender.to_string(),
+                                        edited: false,
+                                        content: message.content.body().to_string(),
+                                        timestamp: message.origin_server_ts.as_secs(),
+                                    };
+
+                                    for i in (0..=channel.message_ids.len()).rev() {
+                                        if i == 0 {
+                                            channel.message_ids.insert(0, message.id.clone());
+                                            channel.messages.insert(message.id.clone(), message);
+                                            break;
+                                        }
+
+                                        if channel.messages.get(&channel.message_ids[i - 1]).map(|v| v.timestamp <= message.timestamp).unwrap_or(false) {
+                                            channel.message_ids.insert(i, message.id.clone());
+                                            channel.messages.insert(message.id.clone(), message);
+
+                                            match lock.messages_state.selected() {
+                                                Some(sel) if sel == i => {
+                                                    lock.messages_state.select(Some(sel - 1));
+                                                }
+
+                                                _ => (),
+                                            }
+
+                                            break;
+                                        }
+                                    }
                                 }
                             }
-
-                            channel.messages.insert(message.id.clone(), message);
                         }
 
                         SyncMessageLikeEvent::Redacted(_) => (),
@@ -225,7 +247,7 @@ async fn main_ui(state: Arc<Mutex<AppState>>) -> Result<(), io::Error> {
             match state.current_channel.as_ref().and_then(|v| state.channels.get(v)) {
                 Some(current) => {
                     let messages_list: Vec<_> = current.message_ids.iter().rev().filter_map(|v| current.messages.get(v)).map(|v| {
-                        vec![Spans::from(vec![Span::raw(&v.user)]), Spans::from(vec![Span::raw(&v.content)])]
+                        vec![Spans::from(vec![Span::raw(&v.user), Span::raw(if v.edited { " [EDITED]" } else { "" })]), Spans::from(vec![Span::raw(&v.content)])]
                     })
                     .map(|v| widgets::ListItem::new(Text::from(v))).collect();
                     let messages = widgets::List::new(messages_list)
@@ -413,7 +435,7 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
 
                     Event::Mouse(_) => (),
                     Event::Paste(_) => (),
-                }               
+                }
             }
 
             Mode::Normal => {
@@ -634,6 +656,7 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                                                                 let message = Message {
                                                                     id: v.event_id.clone(),
                                                                     user: v.sender.to_string(),
+                                                                    edited: false,
                                                                     content: v.content.body().to_string(),
                                                                     timestamp: v.origin_server_ts.as_secs(),
                                                                 };
