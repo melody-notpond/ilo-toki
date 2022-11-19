@@ -5,19 +5,19 @@ Anything marked with a `*` is not essential (but nice to have and will be implem
  - [X] Scrolling through messages and loading more of them
  - [ ] Editing messages
  - [X] Receiving edits
- - [ ] Redacting messages
+ - [X] Redacting messages
  - [ ] Receiving redactions
  - [ ] Creating channels
  - [ ] Inviting people
  - [ ] Joining channels
  - [ ] Leaving channels
  - [ ] Logging in and out
+ - [ ] Remove all panics
 
 ## All TODOs
  - [ ] Messages
      - [ ] Editing messages
      - [ ] Viewing edit history *
-     - [ ] Redacting messages
      - [ ] Receiving redactions
      - [ ] Timestamps
      - [ ] Showing user nicknames

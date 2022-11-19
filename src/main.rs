@@ -8,7 +8,7 @@ use std::{
 };
 
 use crossterm::{
-    event::{Event, KeyCode},
+    event::{Event, KeyCode, KeyModifiers},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
 use matrix_sdk::{
@@ -27,6 +27,7 @@ struct Message {
     id: OwnedEventId,
     user: String,
     edited: bool,
+    //redacted: bool,
     content: String,
     timestamp: UInt,
 }
@@ -737,6 +738,20 @@ async fn ui_events(state: Arc<Mutex<AppState>>) {
                             KeyCode::Delete => (),
                             KeyCode::Insert => (),
                             KeyCode::F(_) => (),
+
+                            KeyCode::Char('d') if key.modifiers == KeyModifiers::CONTROL => {
+                                if let Some(channel) = state.current_channel.as_ref() {
+                                    if let Some(channel_cached) = state.channels.get(channel) {
+                                        if let Some(channel_client) = state.client.get_joined_room(channel) {
+                                            if let Some(index) = state.messages_state.selected() {
+                                                if let Some(message_id) = channel_cached.message_ids.get(channel_cached.message_ids.len() - index - 1) {
+                                                    channel_client.redact(message_id, None, None).await.unwrap();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
                             KeyCode::Char(_) => (),
 
