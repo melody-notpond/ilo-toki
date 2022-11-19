@@ -4,7 +4,7 @@ Anything marked with a `*` is not essential (but nice to have and will be implem
 ## Immediate TODOs for publishing
  - [X] Scrolling through messages and loading more of them
  - [ ] Editing messages
- - [ ] Receiving edits
+ - [X] Receiving edits
  - [ ] Redacting messages
  - [ ] Receiving redactions
  - [ ] Creating channels
@@ -16,7 +16,6 @@ Anything marked with a `*` is not essential (but nice to have and will be implem
 ## All TODOs
  - [ ] Messages
      - [ ] Editing messages
-     - [ ] Receiving edits
      - [ ] Viewing edit history *
      - [ ] Redacting messages
      - [ ] Receiving redactions
